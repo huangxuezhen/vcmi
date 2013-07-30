@@ -1,6 +1,6 @@
 #include "StdInc.h"
 
-#include "../lib/filesystem/CResourceLoader.h"
+#include "../lib/filesystem/Filesystem.h"
 #include "../lib/filesystem/CFileInfo.h"
 #include "../lib/int3.h"
 #include "../lib/mapping/CCampaignHandler.h"
@@ -2233,7 +2233,7 @@ void CGameHandler::save(const std::string & filename )
 // 		}
 
 		{
-			CSaveFile save(CResourceHandler::get()->getResourceName(ResourceID(info.getStem(), EResType::SERVER_SAVEGAME)));
+			CSaveFile save(*CResourceHandler::get()->getResourceName(ResourceID(info.getStem(), EResType::SERVER_SAVEGAME)));
 			saveCommonState(save);
             logGlobal->infoStream() << "Saving server state";
 			save << *this;
@@ -4533,7 +4533,7 @@ void CGameHandler::stackTurnTrigger(const CStack * st)
 		if (st->hasBonusOfType(Bonus::MANA_DRAIN) && !vstd::contains(st->state, EBattleStackState::DRAINED_MANA))
 		{
 			const CGHeroInstance * enemy = gs->curB->getHero(gs->curB->theOtherPlayer(st->owner));
-			const CGHeroInstance * owner = gs->curB->getHero(st->owner);
+			//const CGHeroInstance * owner = gs->curB->getHero(st->owner);
 			if (enemy)
 			{
 				ui32 manaDrained = st->valOfBonuses(Bonus::MANA_DRAIN);
@@ -5332,9 +5332,9 @@ void CGameHandler::handleAfterAttackCasting( const BattleAttack & bat )
 	{
 		// mechanics of Death Stare as in H3:
 		// each gorgon have 10% chance to kill (counted separately in H3) -> binomial distribution
-		// maximum amount that can be killed is ( gorgons_count / 10 ), rounded up
+		//original formula x = min(x, (gorgons_count + 9)/10);
 
-		double chanceToKill = double(attacker->count * attacker->valOfBonuses(Bonus::DEATH_STARE, 0)) / 100;
+		double chanceToKill = attacker->valOfBonuses(Bonus::DEATH_STARE, 0) / 100.0f;
 		vstd::amin(chanceToKill, 1); //cap at 100%
 
 		std::binomial_distribution<> distr(attacker->count, chanceToKill);
@@ -5342,7 +5342,8 @@ void CGameHandler::handleAfterAttackCasting( const BattleAttack & bat )
 
 		int staredCreatures = distr(rng);
 
-		int maxToKill = (attacker->count * chanceToKill + 99) / 100;
+		double cap = 1 / std::max(chanceToKill, (double)(0.01));//don't divide by 0
+		int maxToKill = (attacker->count + cap - 1) / cap; //not much more than chance * count
 		vstd::amin(staredCreatures, maxToKill);
 
 		staredCreatures += (attacker->level() * attacker->valOfBonuses(Bonus::DEATH_STARE, 1)) / gs->curB->battleGetStackByID(bat.bsa[0].stackAttacked)->level();
@@ -6265,6 +6266,9 @@ CasualtiesAfterBattle::CasualtiesAfterBattle(const CArmedInstance *army, BattleI
 	{
 		if(vstd::contains(st->state, EBattleStackState::SUMMONED)) //don't take into account summoned stacks
 			continue;
+
+		//FIXME: this info is also used in BattleInfo::calculateCasualties, refactor
+		st->count = std::max (0, st->count - st->resurrected);
 
 		if(st->owner==color && !army->slotEmpty(st->slot) && st->count < army->getStackCount(st->slot))
 		{

@@ -335,10 +335,10 @@ DLL_LINKAGE void RemoveObject::applyGs( CGameState *gs )
 		return;
 	}
 
-	auto quest = dynamic_cast<const CQuest *>(obj);
+	auto quest = dynamic_cast<const IQuestObject *>(obj);
 	if (quest)
 	{
-		gs->map->quests[quest->qid] = nullptr;
+		gs->map->quests[quest->quest->qid] = nullptr;
 		for (auto &player : gs->players)
 		{
 			for (auto &q : player.second.quests)
@@ -349,7 +349,6 @@ DLL_LINKAGE void RemoveObject::applyGs( CGameState *gs )
 				}
 			}
 		}
-		//gs->map->quests[quest->qid].dellNull();
 	}
 
 	gs->map->objects[id.getNum()].dellNull();
@@ -1404,12 +1403,12 @@ DLL_LINKAGE void StacksHealedOrResurrected::applyGs( CGameState *gs )
 		if(resurrected)
 		{
 			changedStack->state.insert(EBattleStackState::ALIVE);
-			if(elem.lowLevelResurrection)
-				changedStack->state.insert(EBattleStackState::SUMMONED); //TODO: different counter for rised units
 		}
 		//int missingHPfirst = changedStack->MaxHealth() - changedStack->firstHPleft;
 		int res = std::min( elem.healedHP / changedStack->MaxHealth() , changedStack->baseAmount - changedStack->count );
 		changedStack->count += res;
+		if(elem.lowLevelResurrection)
+			changedStack->resurrected += res;
 		changedStack->firstHPleft += elem.healedHP - res * changedStack->MaxHealth();
 		if(changedStack->firstHPleft > changedStack->MaxHealth())
 		{

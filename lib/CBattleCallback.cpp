@@ -449,7 +449,7 @@ si8 CBattleInfoCallback::battleHasWallPenalty(const IBonusBearer *bonusBearer, B
 si8 CBattleInfoCallback::battleCanTeleportTo(const CStack * stack, BattleHex destHex, int telportLevel) const
 {
 	RETURN_IF_NOT_BATTLE(false);
-	if(getAccesibility(stack).accessible(destHex, stack))
+	if (!getAccesibility(stack).accessible(destHex, stack))
 		return false;
 
 	if (battleGetSiegeLevel() && telportLevel < 2) //check for wall
@@ -503,8 +503,8 @@ const CStack* CBattleInfoCallback::battleGetStackByPos(BattleHex pos, bool onlyA
 {
 	RETURN_IF_NOT_BATTLE(nullptr);
 	for(auto s : battleGetAllStacks())
-		if(vstd::contains(s->getHexes(), pos)  &&  (!onlyAlive || s->alive()))
-			return s;
+		if(vstd::contains(s->getHexes(), pos) && (!onlyAlive || s->alive()))
+				return s;
 
 	return nullptr;
 }
@@ -1562,7 +1562,8 @@ ESpellCastProblem::ESpellCastProblem CBattleInfoCallback::battleIsImmune(const C
 
 		if (spell->isRisingSpell())
 		{
-			if (subject->count >= subject->baseAmount) //TODO: calculate potential hp raised
+			auto maxHealth = calculateHealedHP (caster, spell, subject);
+			if (subject->count >= subject->baseAmount || maxHealth < subject->MaxHealth()) //must be able to rise at least one full creature
 				return ESpellCastProblem::STACK_IMMUNE_TO_SPELL;
 		}
 
@@ -1616,22 +1617,21 @@ ESpellCastProblem::ESpellCastProblem CBattleInfoCallback::battleCanCastThisSpell
 	if(!spell->combatSpell)
 		return ESpellCastProblem::ADVMAP_SPELL_INSTEAD_OF_BATTLE_SPELL;
 
-	//TODO?
-	//if(NBonus::hasOfType(heroes[1-cside], Bonus::SPELL_IMMUNITY, spell->id)) //non - casting hero provides immunity for this spell
-	//	return ESpellCastProblem::SECOND_HEROS_SPELL_IMMUNITY;
-	if(spell->isNegative())
+	if(spell->isNegative() || spell->hasEffects())
 	{
-		bool allEnemiesImmune = true;
-		for(auto enemyStack : battleAliveStacks(!side))
+		bool allStacksImmune = true;
+		//we are interested only in enemy stacks when casting offensive spells
+		auto stacks = spell->isNegative() ? battleAliveStacks(!side) : battleAliveStacks();
+		for(auto stack : stacks) 
 		{
-			if(!enemyStack->hasBonusOfType(Bonus::SPELL_IMMUNITY, spell->id))
+			if(!battleIsImmune(castingHero, spell, mode, stack->position))
 			{
-				allEnemiesImmune = false;
+				allStacksImmune = false;
 				break;
 			}
 		}
 
-		if(allEnemiesImmune)
+		if(allStacksImmune)
 			return ESpellCastProblem::NO_APPROPRIATE_TARGET;
 	}
 
@@ -1663,7 +1663,7 @@ ESpellCastProblem::ESpellCastProblem CBattleInfoCallback::battleCanCastThisSpell
 		{
 			const CGHeroInstance * caster = battleGetFightingHero(side);
 			bool targetExists = false;
-			for(const CStack * stack : battleAliveStacks())
+			for(const CStack * stack : battleGetAllStacks()) //dead stacks will be immune anyway
 			{
 				switch (spell->positiveness)
 				{
@@ -1941,8 +1941,9 @@ std::set<const CStack*> CBattleInfoCallback::getAffectedCreatures(const CSpell *
 
 	const ui8 attackerSide = playerToSide(attackerOwner) == 1;
 	const auto attackedHexes = spell->rangeInHexes(destinationTile, skillLevel, attackerSide);
-	const bool onlyAlive = spell->id != SpellID::RESURRECTION && spell->id != SpellID::ANIMATE_DEAD; //when casting resurrection or animate dead we should be allow to select dead stack
-	//fixme: what about other rising spells (Sacrifice) ?
+	const bool onlyAlive = !spell->isRisingSpell(); //when casting resurrection or animate dead we should be allow to select dead stack
+
+	//TODO: more generic solution for mass spells
 	if(spell->id == SpellID::DEATH_RIPPLE || spell->id == SpellID::DESTROY_UNDEAD || spell->id == SpellID::ARMAGEDDON)
 	{
 		for(const CStack *stack : battleGetAllStacks())

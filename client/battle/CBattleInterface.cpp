@@ -975,7 +975,7 @@ void CBattleInterface::newStack(const CStack * stack)
 
 		creAnims[stack->ID] = AnimationControls::getAnimation(turretCreature);
 
-		// Turret positions are read out of the /config/wall_pos.txt
+		// Turret positions are read out of the config/wall_pos.txt
 		int posID = 0;
 		switch (stack->position)
 		{
@@ -1750,25 +1750,14 @@ void CBattleInterface::getPossibleActionsForStack(const CStack * stack)
 				for (Bonus * spellBonus : spellBonuses)
 				{
 					spell = CGI->spellh->spells[spellBonus->subtype];
-					if (spell->isRisingSpell())
+					switch (spellBonus->subtype)
 					{
-						possibleActions.push_back (RISING_SPELL);
-					}
-					//possibleActions.push_back (NO_LOCATION);
-					//possibleActions.push_back (ANY_LOCATION);
-					//TODO: allow stacks cast aimed spells
-					//possibleActions.push_back (OTHER_SPELL);
-					else
-					{
-						switch (spellBonus->subtype)
-						{
-							case SpellID::REMOVE_OBSTACLE:
-								possibleActions.push_back (OBSTACLE);
-								break;
-							default:
-								possibleActions.push_back (selectionTypeByPositiveness (*spell));
-								break;
-						}
+						case SpellID::REMOVE_OBSTACLE:
+							possibleActions.push_back (OBSTACLE);
+							break;
+						default:
+							possibleActions.push_back (selectionTypeByPositiveness (*spell));
+							break;
 					}
 
 				}
@@ -2118,29 +2107,6 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 	//used when l-clicking -> action to be called upon the click
 	std::function<void()> realizeAction;
 
-	//helper lambda that appropriately realizes action / sets cursor and tooltip
-	auto realizeThingsToDo = [&]()
-	{
-		if(eventType == MOVE)
-		{
-			if(setCursor)
-				CCS->curh->changeGraphic(cursorType, cursorFrame);
-			this->console->alterText(consoleMsg);
-			this->console->whoSetAlter = 0;
-		}
-		if(eventType == LCLICK && realizeAction)
-		{
-			//opening creature window shouldn't affect myTurn... 
-			if(currentAction != CREATURE_INFO)
-			{
-				myTurn = false; //tends to crash with empty calls
-			}
-			realizeAction();
-			CCS->curh->changeGraphic(ECursor::COMBAT, ECursor::COMBAT_POINTER);
-			this->console->alterText("");
-		}
-	};
-
 	const CStack * const sactive = activeStack;
 	//Get stack on the hex - first try to grab the alive one, if not found -> allow dead stacks.
 	const CStack *shere = curInt->cb->battleGetStackByPos(myNumber, true);
@@ -2165,7 +2131,7 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 
 	for (PossibleActions action : possibleActions)
 	{
-		bool legalAction = false; //this action is legal and can't be performed
+		bool legalAction = false; //this action is legal and can be performed
 		bool notLegal = false; //this action is not legal and should display message
 		
 		switch (action)
@@ -2217,13 +2183,18 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 					legalAction = true;
 				break;
 			case FRIENDLY_CREATURE_SPELL:
-				if (shere && shere->alive() && ourStack && isCastingPossibleHere (sactive, shere, myNumber))
-					legalAction = true;
+			{
+				if (isCastingPossibleHere (sactive, shere, myNumber)) //need to be called before sp is determined
+				{
+					bool rise = false; //TODO: can you imagine rising hostile creatures?
+					sp = CGI->spellh->spells[creatureCasting ? creatureSpellToCast : spellToCast->additionalInfo];
+					if (sp && sp->isRisingSpell())
+							rise = true;
+					if (shere && (shere->alive() || rise) && ourStack)
+						legalAction = true;
+				}
 				break;
-			case RISING_SPELL:
-				if (shere && shere->canBeHealed() && ourStack && isCastingPossibleHere (sactive, shere, myNumber)) //TODO: at least one stack has to be raised by resurrection / animate dead
-					legalAction = true;
-				break;
+			}
 			case RANDOM_GENIE_SPELL:
 			{
 				if (shere && ourStack && shere != sactive) //only positive spells for other allied creatures
@@ -2402,14 +2373,13 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 				break;
 			case HOSTILE_CREATURE_SPELL:
 			case FRIENDLY_CREATURE_SPELL:
-			case RISING_SPELL:
 				sp = CGI->spellh->spells[creatureCasting ? creatureSpellToCast : spellToCast->additionalInfo]; //necessary if creature has random Genie spell at same time
 				consoleMsg = boost::str(boost::format(CGI->generaltexth->allTexts[27]) % sp->name % shere->getName()); //Cast %s on %s
 				switch (sp->id)
 				{
 					case SpellID::SACRIFICE:
 					case SpellID::TELEPORT:
-						selectedStack = shere; //remember firts target
+						selectedStack = shere; //remember first target
 						secondaryTarget = true;
 						break;
 				}
@@ -2428,15 +2398,17 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 				break;
 			case TELEPORT:
 				consoleMsg = CGI->generaltexth->allTexts[25]; //Teleport Here
+				cursorFrame = ECursor::COMBAT_TELEPORT;
 				isCastingPossible = true;
 				break;
 			case OBSTACLE:
 				consoleMsg = CGI->generaltexth->allTexts[550];
+				//TODO: remove obstacle cursor
 				isCastingPossible = true;
 				break;
 			case SACRIFICE:
-				cursorFrame = ECursor::COMBAT_SACRIFICE;
 				consoleMsg = (boost::format(CGI->generaltexth->allTexts[549]) % shere->getName()).str(); //sacrifice the %s
+				cursorFrame = ECursor::COMBAT_SACRIFICE; 
 				spellToCast->selectedStack = shere->ID; //sacrificed creature is selected
 				isCastingPossible = true;
 				break;
@@ -2473,12 +2445,12 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 		{
 			case HOSTILE_CREATURE_SPELL:
 			case FRIENDLY_CREATURE_SPELL:
-			case RISING_SPELL:
 			case RANDOM_GENIE_SPELL:
 				cursorFrame = ECursor::COMBAT_BLOCKED;
 				consoleMsg = CGI->generaltexth->allTexts[23];
 				break;
 			case TELEPORT:
+				cursorFrame = ECursor::COMBAT_BLOCKED;
 				consoleMsg = CGI->generaltexth->allTexts[24]; //Invalid Teleport Destination
 				break;
 			case SACRIFICE:
@@ -2499,10 +2471,18 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 
 	if (isCastingPossible) //common part
 	{
-		cursorType = ECursor::SPELLBOOK;
-		cursorFrame = 0;
-		if(consoleMsg.empty() && sp)
-			consoleMsg = boost::str(boost::format(CGI->generaltexth->allTexts[26]) % sp->name); //Cast %s
+		switch (currentAction) //don't use that with teleport / sacrifice
+		{
+			case TELEPORT: //FIXME: more generic solution?
+			case SACRIFICE:
+				break;
+			default:
+				cursorType = ECursor::SPELLBOOK;
+				cursorFrame = 0;
+				if(consoleMsg.empty() && sp)
+					consoleMsg = boost::str(boost::format(CGI->generaltexth->allTexts[26]) % sp->name); //Cast %s
+				break;
+		}
 		
 		realizeAction = [=]
 		{
@@ -2552,6 +2532,30 @@ void CBattleInterface::handleHex(BattleHex myNumber, int eventType)
 			}
 		};
 	}
+	//helper lambda that appropriately realizes action / sets cursor and tooltip
+	auto realizeThingsToDo = [&]()
+	{
+		if(eventType == MOVE)
+		{
+			if(setCursor)
+				CCS->curh->changeGraphic(cursorType, cursorFrame);
+			this->console->alterText(consoleMsg);
+			this->console->whoSetAlter = 0;
+		}
+		if(eventType == LCLICK && realizeAction)
+		{
+			//opening creature window shouldn't affect myTurn... 
+			if ((currentAction != CREATURE_INFO) && !secondaryTarget)
+			{
+				myTurn = false; //tends to crash with empty calls
+			}
+			realizeAction();
+			if (!secondaryTarget) //do not replace teleport or sacrifice cursor
+				CCS->curh->changeGraphic(ECursor::COMBAT, ECursor::COMBAT_POINTER); 
+			this->console->alterText("");
+		}
+	};
+
 	realizeThingsToDo();
 }
 

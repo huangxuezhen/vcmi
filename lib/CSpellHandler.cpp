@@ -2,7 +2,7 @@
 #include "CSpellHandler.h"
 
 #include "CGeneralTextHandler.h"
-#include "filesystem/CResourceLoader.h"
+#include "filesystem/Filesystem.h"
 #include "VCMI_Lib.h"
 #include "JsonNode.h"
 #include <cctype>
@@ -281,6 +281,9 @@ bool CSpell::isImmuneBy(const IBonusBearer* obj) const
 			return true;
 	}
 
+	if (obj->hasBonusOfType(Bonus::NEGATE_ALL_NATURAL_IMMUNITIES)) //Orb of vulnerability
+		return false; //TODO: some creaures are unaffected always, for example undead to resurrection.
+
 	for(auto b : immunities)
 	{
 		if (obj->hasBonusOfType(b))
@@ -322,10 +325,6 @@ bool CSpell::isImmuneBy(const IBonusBearer* obj) const
 	}
 
 	TBonusListPtr levelImmunities = obj->getBonuses(Selector::type(Bonus::LEVEL_SPELL_IMMUNITY));
-	if(obj->hasBonusOfType(Bonus::NEGATE_ALL_NATURAL_IMMUNITIES))
-	{
-		levelImmunities->remove_if([](const Bonus* b){  return b->source == Bonus::CREATURE_ABILITY;  });
-	}
 
 	if(obj->hasBonusOfType(Bonus::SPELL_IMMUNITY, id)
 		|| ( levelImmunities->size() > 0  &&  levelImmunities->totalValue() >= level  &&  level))
